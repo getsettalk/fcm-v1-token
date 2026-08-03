@@ -1,0 +1,59 @@
+{
+  "name": "fcm-v1-token",
+  "version": "1.0.0",
+  "description": "Get an FCM v1 OAuth access token from a Firebase service account (cached ~1h, auto-refreshed) and send push notifications. CLI + library for Firebase Cloud Messaging HTTP v1 API.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "fcm-v1-token": "src/cli.js",
+    "fcm-token": "src/cli.js",
+    "fcmt": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "token": "node src/cli.js token",
+    "send": "node src/cli.js send"
+  },
+  "keywords": [
+    "fcm",
+    "fcm-v1",
+    "fcm-http-v1",
+    "firebase",
+    "firebase-cloud-messaging",
+    "push-notification",
+    "push-notifications",
+    "oauth",
+    "oauth2",
+    "access-token",
+    "bearer-token",
+    "service-account",
+    "google-auth",
+    "messaging",
+    "notifications",
+    "cli"
+  ],
+  "author": {
+    "name": "Sujeet Kumar",
+    "url": "https://github.com/TantraIN"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/TantraIN/fcm-v1-token#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TantraIN/fcm-v1-token.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TantraIN/fcm-v1-token/issues"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "google-auth-library": "^9.14.1"
+  }
+}

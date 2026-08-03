@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="340" viewBox="0 0 880 340" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="15">
+  <rect x="0" y="0" width="880" height="340" rx="10" fill="#0d1117"/>
+  <rect x="0" y="0" width="880" height="40" rx="10" fill="#161b22"/>
+  <rect x="0" y="30" width="880" height="10" fill="#161b22"/>
+  <circle cx="24" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="46" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="68" cy="20" r="6" fill="#27c93f"/>
+  <text x="440" y="25" text-anchor="middle" fill="#8b949e" font-size="13">fcm-token token</text>
+  <text xml:space="preserve">
+    <tspan x="24" y="76" fill="#3fb950" font-weight="bold">✓ Access token generated</tspan><tspan fill="#3fb950">  ✓ copied to clipboard</tspan>
+    <tspan x="24" dy="30" fill="#6e7681">Project</tspan><tspan fill="#c9d1d9"> : </tspan><tspan fill="#39c5cf">my-app-12345</tspan>
+    <tspan x="24" dy="24" fill="#6e7681">Client </tspan><tspan fill="#c9d1d9"> : </tspan><tspan fill="#39c5cf">firebase-adminsdk-xxxxx@my-app-12345.iam.gserviceaccount.com</tspan>
+    <tspan x="24" dy="24" fill="#6e7681">Expires</tspan><tspan fill="#c9d1d9"> : </tspan><tspan fill="#d29922">3/8/2026, 4:20:23 pm (~60 min left)</tspan>
+    <tspan x="24" dy="34" fill="#6e7681">Token (triple-click the line below to select):</tspan>
+    <tspan x="24" dy="34" fill="#3fb950">ya29.c0AS6BnMb0BlF2aednZ05s5GngTwjiskY2GAhqh4Bk_XtkjaLw_oOdRCtze…</tspan>
+  </text>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="540" viewBox="0 0 760 540" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="15">
+  <rect x="0" y="0" width="760" height="540" rx="10" fill="#0d1117"/>
+  <rect x="0" y="0" width="760" height="40" rx="10" fill="#161b22"/>
+  <rect x="0" y="30" width="760" height="10" fill="#161b22"/>
+  <circle cx="24" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="46" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="68" cy="20" r="6" fill="#27c93f"/>
+  <text x="380" y="25" text-anchor="middle" fill="#8b949e" font-size="13">npx fcm-v1-token</text>
+  <text xml:space="preserve">
+    <tspan x="24" y="72" fill="#39c5cf" font-weight="bold">🔥 fcm-v1-token</tspan><tspan fill="#6e7681">  v1.0.0</tspan>
+    <tspan x="24" dy="24" fill="#8b949e">Firebase service account </tspan><tspan fill="#6e7681">→</tspan><tspan fill="#8b949e"> FCM v1 OAuth token &amp; push</tspan>
+    <tspan x="24" dy="24" fill="#6e7681">──────────────────────────────────────────────────────</tspan>
+    <tspan x="24" dy="24" fill="#8b949e">Turns a service account key into a 1-hour access token</tspan>
+    <tspan x="24" dy="24" fill="#8b949e">for the FCM v1 API — cached &amp; auto-refreshed — and can</tspan>
+    <tspan x="24" dy="24" fill="#8b949e">send push notifications. Remembers your account.</tspan>
+    <tspan x="24" dy="40" fill="#6e7681">────────────────────────────────────────</tspan>
+    <tspan x="24" dy="24" fill="#8b949e">Using: </tspan><tspan fill="#39c5cf" font-weight="bold">firebase-adminsdk-xxxxx@my-app-12345…</tspan><tspan fill="#6e7681">  (project: my-app-12345)</tspan>
+    <tspan x="24" dy="24" fill="#6e7681">────────────────────────────────────────</tspan>
+    <tspan x="24" dy="24" fill="#e6edf3" font-weight="bold">What do you want to do?</tspan>
+    <tspan x="44" dy="40" fill="#3fb950">[1]</tspan><tspan fill="#c9d1d9"> Get access token</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[2]</tspan><tspan fill="#c9d1d9"> Send a test push</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[3]</tspan><tspan fill="#c9d1d9"> Change service account</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[4]</tspan><tspan fill="#c9d1d9"> Forget saved service account</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[5]</tspan><tspan fill="#c9d1d9"> Exit</tspan>
+    <tspan x="24" dy="40" fill="#39c5cf" font-weight="bold">Choose: </tspan><tspan fill="#6e7681">enter 1-5 and press Enter</tspan>
+  </text>
+</svg>

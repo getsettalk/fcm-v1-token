@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="230" viewBox="0 0 760 230" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="15">
+  <rect x="0" y="0" width="760" height="230" rx="10" fill="#0d1117"/>
+  <rect x="0" y="0" width="760" height="40" rx="10" fill="#161b22"/>
+  <rect x="0" y="30" width="760" height="10" fill="#161b22"/>
+  <circle cx="24" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="46" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="68" cy="20" r="6" fill="#27c93f"/>
+  <text x="380" y="25" text-anchor="middle" fill="#8b949e" font-size="13">first run</text>
+  <text xml:space="preserve">
+    <tspan x="24" y="74" fill="#d29922">No service account is saved yet. Let’s set one up.</tspan>
+    <tspan x="24" dy="34" fill="#e6edf3" font-weight="bold">How do you want to provide the service account?</tspan>
+    <tspan x="44" dy="32" fill="#3fb950">[1]</tspan><tspan fill="#c9d1d9"> File path</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[2]</tspan><tspan fill="#c9d1d9"> Paste JSON content</tspan>
+    <tspan x="44" dy="24" fill="#3fb950">[3]</tspan><tspan fill="#c9d1d9"> Auto-detect from current folder</tspan>
+    <tspan x="24" dy="36" fill="#39c5cf" font-weight="bold">Choose: </tspan><tspan fill="#6e7681">enter 1, 2 or 3 and press Enter</tspan>
+  </text>
+</svg>
