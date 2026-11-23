@@ -157,6 +157,152 @@ async function sendPush(source, message, options = {}) {
   return data;
 }
 
+// ---------------------------------------------------------------------------
+// Message builder: simple options -> a cross-platform FCM v1 "message" object.
+// ---------------------------------------------------------------------------
+
+// FCM topic names: letters, numbers and - _ . ~ %  (the "/topics/" prefix is optional).
+const TOPIC_RE = /^[a-zA-Z0-9\-_.~%]{1,900}$/;
+// Keys FCM rejects inside "data".
+const RESERVED_DATA_KEYS = new Set(['from', 'notification', 'message_type']);
+
+/**
+ * Validate a topic name and strip an optional "/topics/" prefix.
+ * @param {string} topic
+ * @returns {string} bare topic name, e.g. "news"
+ */
+function normalizeTopic(topic) {
+  let t = String(topic == null ? '' : topic).trim();
+  if (t.startsWith('/topics/')) t = t.slice('/topics/'.length);
+  if (!t) throw new Error('Topic name is required.');
+  if (!TOPIC_RE.test(t)) {
+    throw new Error(`Invalid topic name "${t}". Use only letters, numbers and - _ . ~ %`);
+  }
+  return t;
+}
+
+/**
+ * FCM "data" must be a flat map of string -> string. Non-string values are
+ * JSON-encoded; reserved keys throw.
+ * @param {object} data
+ * @returns {Record<string,string>|undefined} undefined when empty
+ */
+function normalizeData(data) {
+  if (data == null) return undefined;
+  if (typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('data must be an object of key/value pairs.');
+  }
+  const out = {};
+  for (const [rawKey, value] of Object.entries(data)) {
+    const key = String(rawKey).trim();
+    if (!key) throw new Error('Data keys cannot be empty.');
+    if (RESERVED_DATA_KEYS.has(key) || key.startsWith('google.') || key.startsWith('gcm.')) {
+      throw new Error(`"${key}" is a reserved FCM data key — use another name.`);
+    }
+    out[key] = value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * Build an FCM v1 message that works on Android, iOS and web from simple options.
+ *
+ * - Notification: title/body (+ optional image) shown in the system tray.
+ *   Images are set for Android/web (notification.image) and iOS
+ *   (apns.fcm_options.image + mutable-content).
+ * - Data only (`dataOnly: true`): no visible notification; delivered to your
+ *   app's code. Sent high priority on Android and as a background push on iOS.
+ *
+ * @param {object} opts
+ * @returns {object} FCM v1 "message" object, ready for sendPush()
+ */
+function buildMessage(opts = {}) {
+  const {
+    token, topic, condition,
+    title, body, image, data, dataOnly,
+    sound = 'default', channelId, clickAction, priority = 'high',
+  } = opts;
+
+  const targets = [token, topic, condition].filter((v) => v != null && String(v).trim() !== '');
+  if (targets.length !== 1) {
+    throw new Error('Set exactly one target: token, topic or condition.');
+  }
+  if (priority !== 'high' && priority !== 'normal') {
+    throw new Error('priority must be "high" or "normal".');
+  }
+
+  const message = {};
+  if (token) message.token = String(token).trim();
+  if (topic) message.topic = normalizeTopic(topic);
+  if (condition) message.condition = String(condition).trim();
+
+  const payload = normalizeData(data);
+  if (payload) message.data = payload;
+
+  if (dataOnly) {
+    if (!payload) throw new Error('A data-only message needs at least one data key/value.');
+    if (title || body || image) {
+      throw new Error('A data-only message cannot have a title, body or image.');
+    }
+    message.android = { priority };
+    message.apns = {
+      headers: { 'apns-push-type': 'background', 'apns-priority': '5' },
+      payload: { aps: { 'content-available': 1 } },
+    };
+    return message;
+  }
+
+  if (!title && !body) {
+    throw new Error('A notification needs a title or a body (or set dataOnly with data).');
+  }
+  if (image && !/^https?:\/\/\S+$/i.test(String(image))) {
+    throw new Error('image must be an http(s) URL.');
+  }
+
+  message.notification = {};
+  if (title) message.notification.title = String(title);
+  if (body) message.notification.body = String(body);
+  if (image) message.notification.image = String(image);
+
+  const playSound = sound && sound !== 'none';
+
+  const androidNote = {};
+  if (playSound) androidNote.sound = sound;
+  if (channelId) androidNote.channel_id = String(channelId);
+  if (clickAction) androidNote.click_action = String(clickAction);
+  const android = {};
+  if (priority === 'normal') android.priority = 'normal'; // notifications default to high
+  if (Object.keys(androidNote).length) android.notification = androidNote;
+  if (Object.keys(android).length) message.android = android;
+
+  const aps = {};
+  if (playSound) aps.sound = sound;
+  if (image) aps['mutable-content'] = 1; // lets the iOS service extension attach the image
+  if (clickAction) aps.category = String(clickAction);
+  const apns = {};
+  if (priority === 'normal') apns.headers = { 'apns-priority': '5' };
+  if (Object.keys(aps).length) apns.payload = { aps };
+  if (image) apns.fcm_options = { image: String(image) };
+  if (Object.keys(apns).length) message.apns = apns;
+
+  return message;
+}
+
+/**
+ * Send a notification (or data-only message) to every device subscribed to a topic.
+ *
+ * @param {string|object} source - service account file path, JSON content, or object
+ * @param {string} topic - topic name, e.g. "news" (or "/topics/news")
+ * @param {object} content - buildMessage() options without a target:
+ *   { title, body, image, data, dataOnly, sound, channelId, clickAction, priority }
+ * @param {object} [options] - { projectId?, dryRun? }
+ * @returns {Promise<object>} FCM response, e.g. { name: 'projects/x/messages/123' }
+ */
+async function sendToTopic(source, topic, content = {}, options = {}) {
+  const { token: _t, condition: _c, ...rest } = content || {};
+  return sendPush(source, buildMessage({ ...rest, topic }), options);
+}
+
 /** Clear the in-memory token client cache (testing / key rotation). */
 function clearCache() {
   clientCache.clear();
@@ -247,6 +393,10 @@ function forgetLastAccount() {
 module.exports = {
   getAccessToken,
   sendPush,
+  sendToTopic,
+  buildMessage,
+  normalizeTopic,
+  normalizeData,
   loadServiceAccount,
   clearCache,
   // persistence

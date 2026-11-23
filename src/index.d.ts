@@ -51,6 +51,60 @@ export function sendPush(
   options?: SendOptions
 ): Promise<Record<string, unknown>>;
 
+/** What to show/deliver — everything except the target. */
+export interface MessageContent {
+  /** Notification title (a notification needs a title or a body). */
+  title?: string;
+  /** Notification body. */
+  body?: string;
+  /** http(s) image URL — set for Android, iOS (needs a service extension) and web. */
+  image?: string;
+  /** Custom key/value data. Non-string values are JSON-encoded. */
+  data?: Record<string, unknown>;
+  /** true => silent data message (no title/body/image); needs `data`. */
+  dataOnly?: boolean;
+  /** Notification sound; default "default". Use "none" (or false) for no sound field. */
+  sound?: string | false;
+  /** Android notification channel id. */
+  channelId?: string;
+  /** Android click_action / iOS category. */
+  clickAction?: string;
+  /** Delivery priority; default "high". */
+  priority?: 'high' | 'normal';
+}
+
+/** buildMessage() options: content plus exactly one target. */
+export interface BuildMessageOptions extends MessageContent {
+  /** Device registration token. */
+  token?: string;
+  /** Topic name, e.g. "news" (a "/topics/" prefix is accepted). */
+  topic?: string;
+  /** Topic condition, e.g. "'news' in topics && 'sports' in topics". */
+  condition?: string;
+}
+
+/** Build a cross-platform FCM v1 message (Android, iOS, web) from simple options. */
+export function buildMessage(options: BuildMessageOptions): Record<string, unknown>;
+
+/**
+ * Send a notification or data-only message to every device subscribed to a topic.
+ * Resolves to the FCM response, e.g. { name: 'projects/x/messages/123' }.
+ */
+export function sendToTopic(
+  source: Source,
+  topic: string,
+  content: MessageContent,
+  options?: SendOptions
+): Promise<Record<string, unknown>>;
+
+/** Validate a topic name and strip an optional "/topics/" prefix. */
+export function normalizeTopic(topic: string): string;
+
+/** Turn data into FCM's string-to-string map; throws on reserved keys. */
+export function normalizeData(
+  data: Record<string, unknown> | null | undefined
+): Record<string, string> | undefined;
+
 /** Remember a service account for later runs. */
 export function saveLastAccount(
   sa: ServiceAccount,

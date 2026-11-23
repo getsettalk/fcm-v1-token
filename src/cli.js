@@ -9,6 +9,9 @@ const { version: VERSION } = require('../package.json');
 const {
   getAccessToken,
   sendPush,
+  buildMessage,
+  normalizeTopic,
+  normalizeData,
   loadServiceAccount,
   saveLastAccount,
   loadLastAccount,
@@ -93,11 +96,18 @@ function ask(rl, q, placeholder) {
 // Read pasted multi-line JSON. Auto-detects completion once the accumulated
 // text parses as JSON, so the user does not have to type anything after the
 // paste. Typing END on its own line is a manual fallback.
-function readPasted(rl) {
+function readPasted(rl, what = 'the service account JSON') {
   return new Promise((resolve) => {
     const lines = [];
-    console.log('\nPaste the service account JSON now (auto-detected when complete):\n');
-    const cleanup = () => rl.removeListener('line', onLine);
+    console.log(`\nPaste ${what} now (auto-detected when complete):\n`);
+    const cleanup = () => {
+      rl.removeListener('line', onLine);
+      rl.removeListener('close', onClose);
+    };
+    const onClose = () => {
+      cleanup();
+      resolve(lines.join('\n'));
+    };
     const onLine = (line) => {
       if (line.trim() === 'END') {
         cleanup();
@@ -117,6 +127,74 @@ function readPasted(rl) {
       }
     };
     rl.on('line', onLine);
+    rl.on('close', onClose);
+  });
+}
+
+// Read custom data: one key=value per line until an empty line, or a pasted
+// JSON object. Bad lines are rejected on the spot so nothing typed is lost.
+function readData(rl) {
+  return new Promise((resolve) => {
+    const data = {};
+    let jsonLines = null;
+    console.log(c.dim('  One key=value per line, empty line to finish — or paste a JSON object.'));
+    const prompt = () => {
+      rl.setPrompt(c.gray('  › '));
+      rl.prompt();
+    };
+    const finish = (result) => {
+      rl.removeListener('line', onLine);
+      rl.removeListener('close', onClose);
+      resolve(result);
+    };
+    const onClose = () => finish(data);
+    const tryAdd = (obj) => {
+      try {
+        normalizeData(obj); // reserved keys etc. -> throws
+        Object.assign(data, obj);
+        return true;
+      } catch (err) {
+        console.log(c.yellow(`    ${err.message}`));
+        return false;
+      }
+    };
+    const onLine = (line) => {
+      const t = line.trim();
+      if (jsonLines) {
+        jsonLines.push(line);
+        try {
+          const obj = JSON.parse(jsonLines.join('\n')); // starts with "{" -> an object
+          jsonLines = null;
+          if (tryAdd(obj)) {
+            finish(data);
+            return;
+          }
+          prompt();
+        } catch (_e) {
+          /* JSON not complete yet */
+        }
+        return;
+      }
+      if (t === '') {
+        finish(data);
+        return;
+      }
+      if (t.startsWith('{')) {
+        jsonLines = [];
+        onLine(line);
+        return;
+      }
+      const eq = t.indexOf('=');
+      if (eq <= 0) {
+        console.log(c.yellow('    Use key=value (or an empty line to finish).'));
+      } else {
+        tryAdd({ [t.slice(0, eq).trim()]: t.slice(eq + 1).trim() });
+      }
+      prompt();
+    };
+    rl.on('line', onLine);
+    rl.on('close', onClose);
+    prompt();
   });
 }
 
@@ -271,18 +349,253 @@ async function doToken(source, opts = {}) {
   console.log('');
 }
 
-async function doSend(rl, source) {
-  const deviceToken = (await ask(rl, 'Device (registration) token: ', 'paste the device token')).trim();
-  if (!deviceToken) throw new Error('Device token is required.');
-  const title = (await ask(rl, 'Title: ', 'e.g. Hello')).trim();
-  const body = (await ask(rl, 'Body : ', 'e.g. World')).trim();
+// ---------------------------------------------------------------------------
+// Sending: to a device token or a topic. The message is either composed
+// interactively (with a preview + confirmation) or built straight from flags.
+// ---------------------------------------------------------------------------
 
-  const res = await sendPush(source, {
-    token: deviceToken,
-    notification: { title, body },
-  });
-  console.log(c.bgreen('\n✓ Push sent.') + c.dim(' FCM response:'));
-  console.log('  ' + c.cyan(JSON.stringify(res)) + '\n');
+const IMAGE_RE = /^https?:\/\/\S+$/i;
+const TARGET_KEYS = ['token', 'topic', 'condition'];
+
+function targetFromFlags(flags) {
+  if (flags.topic && flags.device) throw new Error('Use either --topic or --device, not both.');
+  if (flags.topic) return { topic: normalizeTopic(flags.topic) };
+  if (flags.device) return { token: String(flags.device).trim() };
+  return null;
+}
+
+function hasContentFlags(flags) {
+  return flags.title !== undefined || flags.body !== undefined || flags.image !== undefined ||
+    flags.data.length > 0 || Boolean(flags.dataOnly);
+}
+
+// --data can be repeated; each value is key=value or a JSON object.
+function parseDataFlags(values) {
+  const data = {};
+  for (const v of values) {
+    const t = String(v).trim();
+    if (t.startsWith('{')) {
+      let obj;
+      try {
+        obj = JSON.parse(t);
+      } catch (_e) {
+        throw new Error(`--data is not valid JSON: ${t}`);
+      }
+      Object.assign(data, obj);
+    } else {
+      const eq = t.indexOf('=');
+      if (eq <= 0) throw new Error(`--data expects key=value, got: ${t}`);
+      data[t.slice(0, eq).trim()] = t.slice(eq + 1);
+    }
+  }
+  return data;
+}
+
+// Options that apply to both the flag mode and the interactive composer.
+function extrasFromFlags(flags) {
+  const o = {};
+  if (flags.sound !== undefined) o.sound = flags.sound;
+  if (flags.channel) o.channelId = flags.channel;
+  if (flags.clickAction) o.clickAction = flags.clickAction;
+  if (flags.priority) o.priority = String(flags.priority).toLowerCase();
+  return o;
+}
+
+function contentFromFlags(flags) {
+  const o = extrasFromFlags(flags);
+  if (flags.title !== undefined) o.title = flags.title;
+  if (flags.body !== undefined) o.body = flags.body;
+  if (flags.image !== undefined) o.image = flags.image;
+  if (flags.data.length) o.data = parseDataFlags(flags.data);
+  if (flags.dataOnly) o.dataOnly = true;
+  return o;
+}
+
+// --message: JSON content or a path to a .json file.
+function readMessageArg(arg) {
+  const t = String(arg).trim();
+  if (t.startsWith('{')) return t;
+  try {
+    return fs.readFileSync(path.resolve(t), 'utf8');
+  } catch (_e) {
+    throw new Error(`--message is neither JSON nor a readable file: ${t}`);
+  }
+}
+
+// A full FCM v1 message pasted/passed by the user. Accepts { message: {...} }
+// too. A given target replaces whatever target the JSON had.
+function customMessage(raw, target) {
+  let obj;
+  try {
+    obj = JSON.parse(String(raw).trim());
+  } catch (_e) {
+    throw new Error('The custom message is not valid JSON.');
+  }
+  if (obj && obj.message && typeof obj.message === 'object') obj = obj.message;
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    throw new Error('The custom message must be a JSON object.');
+  }
+  const message = { ...obj };
+  if (target) {
+    TARGET_KEYS.forEach((k) => delete message[k]);
+    Object.assign(message, target);
+  }
+  if (message.topic) message.topic = normalizeTopic(message.topic);
+  if (TARGET_KEYS.filter((k) => message[k]).length > 1) {
+    throw new Error('The custom message has more than one target (token/topic/condition).');
+  }
+  if (message.data !== undefined) message.data = normalizeData(message.data);
+  return message;
+}
+
+async function askTarget(rl, kind) {
+  if (kind === 'topic') {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const t = (await ask(rl, 'Topic : ', 'e.g. news')).trim();
+      try {
+        return { topic: normalizeTopic(t) };
+      } catch (err) {
+        console.log(c.yellow(`  ${err.message}`));
+      }
+    }
+  }
+  const t = (await ask(rl, 'Device (registration) token: ', 'paste the device token')).trim();
+  if (!t) throw new Error('Device token is required.');
+  return { token: t };
+}
+
+async function askMoreOptions(rl) {
+  const o = {};
+  const sound = (await ask(rl, 'Sound           : ', 'Enter = default, a sound name, or none')).trim();
+  if (sound) o.sound = sound;
+  const channel = (await ask(rl, 'Android channel : ', 'optional channel id')).trim();
+  if (channel) o.channelId = channel;
+  const click = (await ask(rl, 'Click action    : ', 'optional, e.g. FLUTTER_NOTIFICATION_CLICK')).trim();
+  if (click) o.clickAction = click;
+  const prio = (await ask(rl, 'Priority        : ', 'high (Enter) or normal')).trim().toLowerCase();
+  if (prio === 'normal') o.priority = 'normal';
+  else if (prio && prio !== 'high') console.log(c.yellow('  Unknown priority — using high.'));
+  return o;
+}
+
+// Interactive composer: notification / notification + data / data only / custom JSON.
+async function composeMessage(rl, target, extras = {}) {
+  console.log('\n' + c.bold('What do you want to send?') + '\n');
+  console.log(`  ${c.green('[1]')} Notification         ${c.dim('title, body, image — shows in the tray')}`);
+  console.log(`  ${c.green('[2]')} Notification + data  ${c.dim('the same, plus your own key/value data')}`);
+  console.log(`  ${c.green('[3]')} Data only            ${c.dim('silent — your app code handles it')}`);
+  console.log(`  ${c.green('[4]')} Custom JSON          ${c.dim('paste a full FCM v1 message')}\n`);
+  const type = (await ask(rl, c.bcyan('Choose: '), 'enter 1-4 (Enter = 1)')).trim() || '1';
+  if (!['1', '2', '3', '4'].includes(type)) throw new Error('Invalid choice.');
+
+  if (type === '4') {
+    const raw = await readPasted(rl, 'the FCM message JSON ({"notification": {...}, "data": {...}, ...})');
+    return customMessage(raw, target);
+  }
+
+  const opts = { ...target, ...extras };
+  if (type === '3') {
+    opts.dataOnly = true;
+  } else {
+    while (!opts.title && !opts.body) {
+      opts.title = (await ask(rl, 'Title : ', 'e.g. Hello')).trim();
+      opts.body = (await ask(rl, 'Body  : ', 'e.g. World')).trim();
+      if (!opts.title && !opts.body) console.log(c.yellow('  Enter a title or a body.'));
+    }
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const img = (await ask(rl, 'Image : ', 'optional https:// URL — Enter to skip')).trim();
+      if (!img || IMAGE_RE.test(img)) {
+        if (img) opts.image = img;
+        break;
+      }
+      console.log(c.yellow('  The image must be an http(s) URL.'));
+    }
+  }
+
+  if (type === '2' || type === '3') {
+    console.log('\n' + c.bold('Data') + (type === '2' ? c.dim(' (optional)') : ''));
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      opts.data = await readData(rl);
+      if (type === '2' || Object.keys(opts.data).length) break;
+      console.log(c.yellow('  A data-only message needs at least one key=value.'));
+    }
+  }
+
+  if (type !== '3' && Object.keys(extras).length === 0) {
+    const more = (await ask(rl, 'More options (sound, channel, click action, priority)? ', 'y/N')).trim().toLowerCase();
+    if (more === 'y' || more === 'yes') Object.assign(opts, await askMoreOptions(rl));
+  }
+  return buildMessage(opts);
+}
+
+function describeTarget(message) {
+  if (message.topic) return `topic "${message.topic}"`;
+  if (message.condition) return `condition ${message.condition}`;
+  return 'the device';
+}
+
+function printSendResult(message, res, dryRun, json) {
+  if (json) {
+    console.log(JSON.stringify(res, null, 2));
+    return;
+  }
+  const where = describeTarget(message);
+  if (dryRun) {
+    console.log(c.bgreen('\n✓ Valid.') + ` FCM accepted the message for ${where} ` +
+      c.dim('(dry run — nothing was delivered).'));
+  } else {
+    console.log(c.bgreen(`\n✓ Sent to ${where}.`));
+  }
+  if (res && res.name) console.log(`  ${c.dim('Message ID')} : ${c.cyan(res.name)}`);
+  if (message.topic && !dryRun) {
+    console.log(c.dim('  Every device subscribed to this topic receives it. FCM does not report how many that is.'));
+  }
+  console.log('');
+}
+
+async function doSend(rl, source, kind, flags) {
+  const target = targetFromFlags(flags);
+  const fromFlags = Boolean(flags.message) || hasContentFlags(flags);
+  let message;
+
+  if (flags.message) {
+    message = customMessage(readMessageArg(flags.message), target);
+    if (!TARGET_KEYS.some((k) => message[k])) Object.assign(message, await askTarget(rl, kind));
+  } else {
+    const to = target || (await askTarget(rl, kind));
+    message = fromFlags
+      ? buildMessage({ ...to, ...contentFromFlags(flags) })
+      : await composeMessage(rl, to, extrasFromFlags(flags));
+  }
+
+  let dryRun = Boolean(flags.dryRun);
+
+  // Interactive: always show what will be sent and ask before sending.
+  if (!fromFlags && !flags.yes) {
+    console.log('\n' + c.bold('Message preview') + c.dim(' (FCM v1 JSON)'));
+    console.log(JSON.stringify(message, null, 2).split('\n').map((l) => '  ' + c.cyan(l)).join('\n'));
+    if (message.topic && !dryRun) {
+      console.log(c.yellow(`\n  ⚠ This goes to EVERY device subscribed to topic "${message.topic}".`));
+    }
+    const answer = (await ask(
+      rl,
+      c.bcyan(dryRun ? '\nValidate it now (dry run)? ' : '\nSend now? '),
+      dryRun ? 'Y/n' : 'Y = send · d = dry run (validate only) · n = cancel'
+    )).trim().toLowerCase();
+    if (answer === 'd' || answer === 'dry') {
+      dryRun = true;
+    } else if (!['', 'y', 'yes'].includes(answer)) {
+      console.log(c.dim('\nCancelled — nothing was sent.\n'));
+      return null;
+    }
+  }
+
+  const res = await sendPush(source, message, { dryRun });
+  printSendResult(message, res, dryRun, flags.json);
+  return res;
 }
 
 function showSaved() {
@@ -327,25 +640,28 @@ async function interactive() {
       console.log(line);
       console.log(c.bold('What do you want to do?') + '\n');
       console.log(`  ${c.green('[1]')} Get access token`);
-      console.log(`  ${c.green('[2]')} Send a test push`);
-      console.log(`  ${c.green('[3]')} Change service account`);
-      console.log(`  ${c.green('[4]')} Forget saved service account`);
-      console.log(`  ${c.green('[5]')} Exit\n`);
+      console.log(`  ${c.green('[2]')} Send a test push to a device`);
+      console.log(`  ${c.green('[3]')} Send a real notification to a topic`);
+      console.log(`  ${c.green('[4]')} Change service account`);
+      console.log(`  ${c.green('[5]')} Forget saved service account`);
+      console.log(`  ${c.green('[6]')} Exit\n`);
 
-      const choice = (await ask(rl, c.bcyan('Choose: '), 'enter 1-5 and press Enter')).trim();
+      const choice = (await ask(rl, c.bcyan('Choose: '), 'enter 1-6 and press Enter')).trim();
 
       try {
         if (choice === '1') {
           await doToken(savedSource(saved));
         } else if (choice === '2') {
-          await doSend(rl, savedSource(saved));
+          await doSend(rl, savedSource(saved), 'device', EMPTY_FLAGS);
         } else if (choice === '3') {
-          await setupServiceAccount(rl);
+          await doSend(rl, savedSource(saved), 'topic', EMPTY_FLAGS);
         } else if (choice === '4') {
+          await setupServiceAccount(rl);
+        } else if (choice === '5') {
           forgetLastAccount();
           console.log(c.yellow('\nForgotten. Setting up a new one.'));
           await setupServiceAccount(rl);
-        } else if (choice === '5' || choice.toLowerCase() === 'exit' || choice === '') {
+        } else if (choice === '6' || choice.toLowerCase() === 'exit' || choice === '') {
           console.log(c.dim('\nBye.\n'));
           return;
         } else {
@@ -373,7 +689,7 @@ function printBanner() {
   console.log('  ' + rule);
   console.log('  ' + c.dim('Turns a service account key into a 1-hour access token'));
   console.log('  ' + c.dim('for the FCM v1 API — cached & auto-refreshed — and can'));
-  console.log('  ' + c.dim('send push notifications. Remembers your account.'));
+  console.log('  ' + c.dim('send push to a device or a topic. Remembers your account.'));
   console.log('');
 }
 
@@ -387,7 +703,8 @@ Run with no arguments for an interactive menu. Your service account
 Usage:
   fcm-token                     Interactive menu (remembers last account)
   fcm-token token [source]      Print an access token
-  fcm-token send  [source]      Send a test push (interactive prompts)
+  fcm-token send  [source]      Send a push to a device (interactive prompts)
+  fcm-token topic [source]      Send a notification to a topic (interactive)
   fcm-token use   <source>      Set / replace the saved service account
   fcm-token whoami              Show the saved service account
   fcm-token forget              Remove the saved service account
@@ -402,40 +719,134 @@ Options (for "token"):
   --raw       Print only the token (for scripting)
   --no-copy   Do not copy the token to the clipboard
 
+Options (for "send" / "topic") — with any content option it sends right away,
+without prompts; without them you get the interactive composer:
+  --topic <name>          Send to every device subscribed to this topic
+  --device <token>        Send to one device registration token
+  --title <text>          Notification title
+  --body <text>           Notification body
+  --image <url>           Image URL (Android, iOS and web)
+  --data <key=value>      Custom data; repeat it, or pass a JSON object
+  --data-only             Silent data message (no title/body/image)
+  --message <json|file>   A full custom FCM v1 message (JSON or .json file)
+  --sound <name|none>     Notification sound (default: "default")
+  --channel <id>          Android notification channel id
+  --click-action <name>   Android click_action / iOS category
+  --priority <high|normal>  Delivery priority (default: high)
+  --dry-run               Validate with FCM only — nothing is delivered
+  --yes, -y               Interactive mode: send without the confirm step
+  --json                  Print the raw FCM response as JSON
+
 Examples:
   npx fcm-v1-token                       # menu, remembers your file
   fcm-token use ./service-account.json   # remember this file
   fcm-token token --raw                  # print token using saved account
   TOKEN=$(fcm-token token --raw)
-  fcm-token send                         # push using saved account
+  fcm-token send                         # push to a device, using saved account
+  fcm-token topic                        # notification to a topic (interactive)
+  fcm-token send --topic news --title "Hi" --body "Hello" \\
+      --image https://example.com/a.png --data screen=home --data id=42
+  fcm-token send --topic news --data-only --data '{"type":"sync"}'
+  fcm-token send --topic news --title "Test" --dry-run
 `);
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+// Flags that take a value, and boolean switches. Names map to keys in `flags`.
+const VALUE_FLAGS = {
+  topic: 'topic',
+  device: 'device',
+  title: 'title',
+  body: 'body',
+  image: 'image',
+  data: 'data',
+  message: 'message',
+  sound: 'sound',
+  channel: 'channel',
+  'click-action': 'clickAction',
+  priority: 'priority',
+};
+const BOOL_FLAGS = {
+  help: 'help',
+  json: 'json',
+  raw: 'raw',
+  'no-copy': 'noCopy',
+  'data-only': 'dataOnly',
+  'dry-run': 'dryRun',
+  yes: 'yes',
+};
+const SHORT_FLAGS = { h: 'help', y: 'yes' };
+const EMPTY_FLAGS = Object.freeze({ data: [] });
 
-  if (argv.includes('--help') || argv.includes('-h')) {
+// Supports "--flag value", "--flag=value", repeated --data and "--" to end flags.
+function parseArgs(argv) {
+  const flags = { data: [] };
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--') {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (/^-[a-zA-Z]$/.test(a)) {
+      const key = SHORT_FLAGS[a[1]];
+      if (!key) throw new Error(`Unknown option ${a}. Run with --help.`);
+      flags[key] = true;
+      continue;
+    }
+    if (!a.startsWith('--')) {
+      positional.push(a);
+      continue;
+    }
+    let name = a.slice(2);
+    let value;
+    const eq = name.indexOf('=');
+    if (eq !== -1) {
+      value = name.slice(eq + 1);
+      name = name.slice(0, eq);
+    }
+    if (BOOL_FLAGS[name]) {
+      flags[BOOL_FLAGS[name]] = true;
+      continue;
+    }
+    const key = VALUE_FLAGS[name];
+    if (!key) throw new Error(`Unknown option --${name}. Run with --help.`);
+    if (value === undefined) {
+      if (i + 1 >= argv.length) throw new Error(`--${name} needs a value.`);
+      value = argv[++i];
+    }
+    if (key === 'data') flags.data.push(value);
+    else flags[key] = value;
+  }
+  return { flags, positional };
+}
+
+async function main() {
+  const { flags, positional } = parseArgs(process.argv.slice(2));
+
+  if (flags.help) {
     printHelp();
     return;
   }
 
   const opts = {
-    json: argv.includes('--json'),
-    raw: argv.includes('--raw'),
-    copy: !argv.includes('--no-copy'),
+    json: Boolean(flags.json),
+    raw: Boolean(flags.raw),
+    copy: !flags.noCopy,
   };
-  const positional = argv.filter((a) => !a.startsWith('--'));
+  const wantsSend = Boolean(flags.topic || flags.device || flags.message) || hasContentFlags(flags);
 
-  const COMMANDS = new Set(['token', 'send', 'use', 'whoami', 'forget']);
+  const COMMANDS = new Set(['token', 'send', 'topic', 'use', 'whoami', 'forget']);
   let command;
   let sourceArg;
   if (positional.length && COMMANDS.has(positional[0])) {
     command = positional[0];
     sourceArg = positional[1];
   } else if (positional.length) {
-    // First positional is a source -> default to token.
-    command = 'token';
+    // First positional is a source -> default to token (or send, if send flags were given).
+    command = wantsSend ? 'send' : 'token';
     sourceArg = positional[0];
+  } else if (wantsSend) {
+    command = 'send';
   }
 
   // No command at all -> interactive menu.
@@ -473,10 +884,10 @@ async function main() {
     return;
   }
 
-  if (command === 'send') {
+  if (command === 'send' || command === 'topic') {
     await withRL(async (rl) => {
       const source = await resolveSource(rl, sourceArg);
-      await doSend(rl, source);
+      await doSend(rl, source, command === 'topic' ? 'topic' : 'device', flags);
     });
     return;
   }
