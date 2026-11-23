@@ -1,7 +1,7 @@
 {
   "name": "fcm-v1-token",
-  "version": "1.0.0",
-  "description": "Get an FCM v1 OAuth access token from a Firebase service account (cached ~1h, auto-refreshed) and send push notifications. CLI + library for Firebase Cloud Messaging HTTP v1 API.",
+  "version": "1.1.0",
+  "description": "Get an FCM v1 OAuth access token from a Firebase service account (cached ~1h, auto-refreshed) and send push notifications to devices or topics: title, body, image, custom data or data-only. CLI + library for the Firebase Cloud Messaging HTTP v1 API.",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "bin": {
@@ -12,7 +12,8 @@
   "scripts": {
     "start": "node src/cli.js",
     "token": "node src/cli.js token",
-    "send": "node src/cli.js send"
+    "send": "node src/cli.js send",
+    "test": "node --test"
   },
   "keywords": [
     "fcm",
@@ -22,6 +23,9 @@
     "firebase-cloud-messaging",
     "push-notification",
     "push-notifications",
+    "data-message",
+    "topic-messaging",
+    "fcm-topic",
     "oauth",
     "oauth2",
     "access-token",

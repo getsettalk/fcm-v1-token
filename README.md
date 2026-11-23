@@ -35,12 +35,15 @@ The legacy FCM server key is **deprecated**. The modern **FCM HTTP v1 API** requ
 - 🔁 **Caches the token ~1 hour and auto‑refreshes** it before expiry
 - 📋 **Copies the token to your clipboard** automatically (and prints it copy‑friendly)
 - 📤 **Sends push** via the FCM v1 API with a one‑line helper
+- 📣 **Sends to a topic**: a notification (title, body, image), notification + custom data, data‑only, or your own custom JSON, delivered to every device subscribed to that topic on Android, iOS and web
+- 👀 **Previews the exact FCM JSON** before sending, with a **dry‑run** option that validates without delivering
 - 📦 **Zero config**, one dependency (`google-auth-library`), works with `npx`
 
 ## Table of contents
 
 - [Install](#install)
 - [Quick start (CLI)](#quick-start-cli)
+- [Send a notification to a topic](#send-a-notification-to-a-topic)
 - [CLI commands](#cli-commands)
 - [Use as a library](#use-as-a-library)
 - [How it works](#how-it-works)
@@ -107,12 +110,68 @@ curl -X POST \
 
 ---
 
+## Send a notification to a topic
+
+Pick **[3] Send a real notification to a topic** in the menu (or run `fcm-token topic`). Enter the topic, then choose what to send:
+
+| Type | What the device gets |
+| --- | --- |
+| **Notification** | Title, body and an optional image, shown in the system tray |
+| **Notification + data** | The same, plus your own `key=value` data for the app |
+| **Data only** | A silent message that only your app's code receives |
+| **Custom JSON** | Any FCM v1 message you paste. The topic you entered replaces any target in it |
+
+You can also set the sound, the Android channel, the click action and the priority. Before anything is sent you see the exact FCM JSON and choose **Y** to send, **d** for a dry run that only validates it, or **n** to cancel.
+
+```text
+Topic : news
+
+What do you want to send?
+  [1] Notification         title, body, image — shows in the tray
+  [2] Notification + data  the same, plus your own key/value data
+  [3] Data only            silent — your app code handles it
+  [4] Custom JSON          paste a full FCM v1 message
+
+Title : Big Sale
+Body  : 50% off today
+Image : https://example.com/sale.png
+  › screen=offers
+  › id=42
+
+  ⚠ This goes to EVERY device subscribed to topic "news".
+Send now? Y = send · d = dry run (validate only) · n = cancel
+```
+
+Or send it in one line, without any prompts:
+
+```bash
+# Notification with an image and custom data
+fcm-token send --topic news --title "Big Sale" --body "50% off today" \
+  --image https://example.com/sale.png --data screen=offers --data id=42
+
+# Data-only (silent) message
+fcm-token send --topic news --data-only --data type=sync --data count=3
+
+# Your own FCM v1 message (JSON or a .json file)
+fcm-token send --topic news --message ./message.json
+
+# Validate with FCM without delivering anything
+fcm-token send --topic news --title "Test" --dry-run
+```
+
+The same message works on **Android, iOS and web**. The image is set for Android and web (`notification.image`) and for iOS (`apns.fcm_options.image` with `mutable-content`). Data-only messages go out at high priority on Android and as background pushes on iOS.
+
+> A topic message reaches **every** device subscribed to that topic in the project of your service account. FCM does not say how many devices that is. Use `--dry-run` while you are trying things out.
+
+---
+
 ## CLI commands
 
 ```text
 fcm-token                     Interactive menu (remembers your last account)
 fcm-token token [source]      Print an access token
-fcm-token send  [source]      Send a test push (interactive prompts)
+fcm-token send  [source]      Send a push to a device (interactive prompts)
+fcm-token topic [source]      Send a notification to a topic (interactive)
 fcm-token use   <source>      Set / replace the saved service account
 fcm-token whoami              Show the saved service account
 fcm-token forget              Remove the saved service account
@@ -128,6 +187,26 @@ fcm-token --help              Show help
 | `--raw` | Print only the token — no color, no clipboard (for scripting) |
 | `--json` | Print full info (`token`, `projectId`, `expiresAt`) as JSON |
 | `--no-copy` | Do not copy the token to the clipboard |
+
+**Options for `send` / `topic`:** with any content option (`--title`, `--body`, `--image`, `--data`, `--data-only`, `--message`) the message is sent right away without prompts. Without them you get the interactive composer.
+
+| Flag | Description |
+| --- | --- |
+| `--topic <name>` | Send to every device subscribed to this topic (`/topics/` prefix optional) |
+| `--device <token>` | Send to one device registration token |
+| `--title <text>` | Notification title |
+| `--body <text>` | Notification body |
+| `--image <url>` | Image URL (Android, iOS, web) |
+| `--data <key=value>` | Custom data. Repeat it, or pass a JSON object |
+| `--data-only` | Silent data message (no title/body/image) |
+| `--message <json\|file>` | A full custom FCM v1 message |
+| `--sound <name\|none>` | Notification sound (default `default`) |
+| `--channel <id>` | Android notification channel id |
+| `--click-action <name>` | Android `click_action` / iOS `category` |
+| `--priority <high\|normal>` | Delivery priority (default `high`) |
+| `--dry-run` | Validate with FCM only, deliver nothing |
+| `--yes`, `-y` | Interactive mode: skip the confirm step |
+| `--json` | Print the raw FCM response as JSON |
 
 > Set `NO_COLOR=1` to disable colors. The short alias `fcmt` works everywhere, and `npx fcm-v1-token` runs the same tool without installing.
 
@@ -157,13 +236,39 @@ await sendPush('./service-account.json', {
 });
 ```
 
-Send to a **topic**:
+Send to a **topic**. `sendToTopic` builds a message that works on Android, iOS and web:
 
 ```js
-await sendPush('./service-account.json', {
-  topic: 'news',
-  notification: { title: 'Breaking', body: 'Something happened' },
+const { sendToTopic } = require('fcm-v1-token');
+
+// Notification with an image and custom data
+await sendToTopic('./service-account.json', 'news', {
+  title: 'Breaking',
+  body: 'Something happened',
+  image: 'https://example.com/photo.png',
+  data: { articleId: 42 }, // values are sent as strings
 });
+
+// Data-only (silent) message
+await sendToTopic('./service-account.json', 'news', {
+  dataOnly: true,
+  data: { type: 'sync' },
+});
+```
+
+Or build the message yourself and pass it to `sendPush`:
+
+```js
+const { buildMessage, sendPush } = require('fcm-v1-token');
+
+const message = buildMessage({
+  topic: 'news', // or token: '<device-token>', or condition: "'a' in topics"
+  title: 'Hello',
+  body: 'World',
+  channelId: 'promo',
+  clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+});
+await sendPush('./service-account.json', message);
 ```
 
 **Validate only** (do not deliver):
@@ -202,6 +307,10 @@ No secrets ever leave your machine — the token is created and used locally.
 | --- | --- |
 | `getAccessToken(source)` | `{ token, projectId, clientEmail, expiresAt }` |
 | `sendPush(source, message, options?)` | FCM v1 response object |
+| `sendToTopic(source, topic, content, options?)` | FCM v1 response object |
+| `buildMessage(options)` | FCM v1 `message` object for Android, iOS and web |
+| `normalizeTopic(topic)` | bare topic name (strips `/topics/`, validates) |
+| `normalizeData(data)` | FCM `data` map (string values, reserved keys rejected) |
 | `loadServiceAccount(source)` | validated service account object |
 | `saveLastAccount(sa, source)` | persist an account for later runs → config path |
 | `loadLastAccount()` | saved config, or `null` |
@@ -211,6 +320,7 @@ No secrets ever leave your machine — the token is created and used locally.
 
 - **`source`** — a file path (string), pasted JSON content (string), or a credentials object.
 - **`options`** — `{ projectId?, dryRun? }`.
+- **`content`** — `{ title?, body?, image?, data?, dataOnly?, sound?, channelId?, clickAction?, priority? }`. `buildMessage` takes the same fields plus one target: `token`, `topic` or `condition`.
 
 TypeScript types are bundled (`src/index.d.ts`).
 
@@ -247,6 +357,13 @@ About **1 hour** (3600 seconds). This tool caches it and refreshes it automatica
 
 **How do I send an FCM v1 push notification in Node.js?**
 Use `sendPush(source, message)` — see [Send a push notification](#send-a-push-notification-fcm-v1). It posts to `messages:send` with the right `Authorization: Bearer` header for you.
+
+**How do devices subscribe to a topic?**
+In the app, with the Firebase SDK:
+Android `Firebase.messaging.subscribeToTopic("news")` · iOS `Messaging.messaging().subscribe(toTopic: "news")` · Flutter `FirebaseMessaging.instance.subscribeToTopic('news')` · React Native `messaging().subscribeToTopic('news')`. A new subscription can take a little while before topic messages start arriving.
+
+**The image shows on Android but not on iOS. Why?**
+iOS needs a Notification Service Extension in the app to download and attach the image. This tool already sends `mutable-content` and `fcm_options.image` for you.
 
 **Do I still need the legacy FCM server key?**
 No. The legacy server key is deprecated. The HTTP v1 API uses OAuth 2.0 tokens from a service account, which is exactly what this tool produces.

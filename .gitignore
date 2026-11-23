@@ -1,0 +1,6 @@
+node_modules/
+*.tgz
+.DS_Store
+# Never commit Firebase keys
+service-account*.json
+*-firebase-adminsdk-*.json
